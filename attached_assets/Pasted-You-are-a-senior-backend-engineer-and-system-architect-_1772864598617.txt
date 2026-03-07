@@ -1,0 +1,221 @@
+You are a senior backend engineer and system architect.
+
+Build a scalable backend for a productivity web application called "CodeFlix". The frontend is already built using React and Vite. Your task is to design a backend that synchronizes all frontend components with persistent data storage.
+
+The application helps users stay focused while learning from coding and DSA videos by converting study sessions into short “episodes”.
+
+Technology Requirements
+
+Backend Framework:
+Node.js with Express
+
+Database:
+PostgreSQL using Prisma ORM
+
+Authentication:
+JWT based authentication system
+
+Hosting Compatibility:
+The backend must be deployable on platforms like Railway, Render, or Vercel serverless functions.
+
+Core Backend Features
+
+1. User Authentication System
+
+Implement secure authentication.
+
+Users must be able to:
+
+* Sign up
+* Log in
+* Log out
+
+Fields for user model:
+
+* id
+* name
+* email
+* password (hashed using bcrypt)
+* createdAt
+
+Endpoints:
+POST /auth/signup
+POST /auth/login
+GET /auth/me
+
+Return JWT tokens for authentication.
+
+2. User Video Learning System
+
+Users should be able to add their own YouTube video links.
+
+At first the system must have NO preloaded videos.
+
+Only user-added videos will appear in their dashboard.
+
+Each video must store:
+
+* id
+* userId
+* youtubeUrl
+* youtubeVideoId
+* title
+* createdAt
+
+Endpoint examples:
+
+POST /videos/add
+GET /videos
+DELETE /videos/:id
+
+3. YouTube Progress Tracking
+
+When a user watches a video, the backend must store their progress.
+
+Fields:
+
+* id
+* userId
+* videoId
+* lastWatchedTimestamp
+* completedEpisodes
+* totalWatchTime
+
+Endpoints:
+
+POST /progress/update
+GET /progress/:videoId
+
+The frontend will call this API every few seconds to save progress.
+
+4. Episode Learning System
+
+Each video should be broken into small learning sessions called "episodes".
+
+Example:
+
+Episode 1 – Watch first 8 minutes
+Episode 2 – Write 2 notes
+Episode 3 – Solve 1 problem
+
+Database fields:
+
+Episode
+
+* id
+* videoId
+* episodeNumber
+* title
+* duration
+* completed
+
+Endpoints:
+
+GET /episodes/:videoId
+POST /episodes/complete
+
+Episodes must unlock sequentially.
+
+5. Focus Session Tracking
+
+Track user study sessions.
+
+Fields:
+
+* id
+* userId
+* duration
+* date
+* completed
+
+Endpoints:
+
+POST /focus/start
+POST /focus/complete
+GET /focus/stats
+
+This allows tracking daily streaks.
+
+6. Streak System
+
+Calculate daily learning streak.
+
+If the user studies at least 10 minutes in a day:
+
+increase streak.
+
+If they miss a day:
+
+streak resets.
+
+Endpoint:
+
+GET /streak
+
+7. Story Unlock Feature
+
+Users unlock story segments after focus sessions.
+
+Story table fields:
+
+* id
+* chapterNumber
+* text
+
+UserStoryProgress table:
+
+* userId
+* chapterUnlocked
+
+Endpoint:
+
+GET /story/unlocked
+
+8. Security
+
+* Use bcrypt for password hashing
+* Validate all inputs
+* Prevent duplicate YouTube videos per user
+* Use middleware for authentication
+
+9. YouTube Parsing
+
+When a user submits a YouTube link, automatically extract:
+
+youtubeVideoId
+
+Example:
+
+https://www.youtube.com/watch?v=abc123
+
+Store:
+
+abc123
+
+The frontend will embed the player using this ID.
+
+10. Project Structure
+
+Create a clean architecture.
+
+Example structure:
+
+backend
+├── controllers
+├── routes
+├── middleware
+├── services
+├── prisma
+├── utils
+├── server.js
+
+11. Output Requirements
+
+Generate:
+
+1. full backend project structure
+2. database schema using Prisma
+3. all API routes
+4. middleware for authentication
+5. instructions to run locally
+6. instructions to deploy backend
