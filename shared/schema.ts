@@ -7,6 +7,11 @@ export const users = pgTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  xp: integer("xp").default(0).notNull(),
+  level: integer("level").default(1).notNull(),
+  currentStreak: integer("current_streak").default(0).notNull(),
+  longestStreak: integer("longest_streak").default(0).notNull(),
+  lastActiveDate: timestamp("last_active_date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -16,6 +21,8 @@ export const videos = pgTable("videos", {
   youtubeUrl: text("youtube_url").notNull(),
   youtubeVideoId: text("youtube_video_id").notNull(),
   title: text("title").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  duration: integer("duration"), // in seconds
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -23,9 +30,9 @@ export const progress = pgTable("progress", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   videoId: integer("video_id").notNull(),
-  lastWatchedTimestamp: integer("last_watched_timestamp").default(0),
-  completedEpisodes: integer("completed_episodes").default(0),
-  totalWatchTime: integer("total_watch_time").default(0),
+  lastWatchedTimestamp: integer("last_watched_timestamp").default(0).notNull(),
+  completedEpisodes: integer("completed_episodes").default(0).notNull(),
+  totalWatchTime: integer("total_watch_time").default(0).notNull(),
 });
 
 export const episodes = pgTable("episodes", {
@@ -33,8 +40,9 @@ export const episodes = pgTable("episodes", {
   videoId: integer("video_id").notNull(),
   episodeNumber: integer("episode_number").notNull(),
   title: text("title").notNull(),
-  duration: integer("duration").notNull(),
-  completed: boolean("completed").default(false),
+  startTime: integer("start_time").notNull(), // in seconds
+  endTime: integer("end_time").notNull(), // in seconds
+  completed: boolean("completed").default(false).notNull(),
 });
 
 export const focusSessions = pgTable("focus_sessions", {

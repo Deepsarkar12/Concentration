@@ -18,7 +18,7 @@ export interface IStorage {
   
   // Videos
   getVideos(userId: number): Promise<Video[]>;
-  addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string): Promise<Video>;
+  addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string, thumbnailUrl?: string, duration?: number): Promise<Video>;
   deleteVideo(id: number, userId: number): Promise<boolean>;
 
   // Progress
@@ -62,8 +62,25 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(videos).where(eq(videos.userId, userId));
   }
 
-  async addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string): Promise<Video> {
-    const [video] = await db.insert(videos).values({ userId, youtubeUrl, youtubeVideoId, title }).returning();
+  async addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string, thumbnailUrl?: string, duration?: number): Promise<Video> {
+    const [video] = await db.insert(videos).values({ userId, youtubeUrl, youtubeVideoId, title, thumbnailUrl, duration }).returning();
+    
+    // Auto-generate episodes if duration exists
+    if (duration && duration > 0) {
+      const episodeDuration = 480; // 8 minutes in seconds
+      const numEpisodes = Math.ceil(duration / episodeDuration);
+      for (let i = 0; i < numEpisodes; i++) {
+        await db.insert(episodes).values({
+          videoId: video.id,
+          episodeNumber: i + 1,
+          title: `Episode ${i + 1}`,
+          startTime: i * episodeDuration,
+          endTime: Math.min((i + 1) * episodeDuration, duration),
+          completed: false
+        });
+      }
+    }
+    
     return video;
   }
 
@@ -99,6 +116,18 @@ export class DatabaseStorage implements IStorage {
 
   async completeEpisode(id: number): Promise<Episode> {
     const [episode] = await db.update(episodes).set({ completed: true }).where(eq(episodes.id, id)).returning();
+    
+    // Add XP for episode completion
+    const [video] = await db.select().from(videos).where(eq(videos.id, episode.videoId));
+    if (video) {
+      const [user] = await db.select().from(users).where(eq(users.id, video.userId));
+      if (user) {
+        const newXp = user.xp + 5;
+        const newLevel = Math.floor(newXp / 100) + 1;
+        await db.update(users).set({ xp: newXp, level: newLevel }).where(eq(users.id, user.id));
+      }
+    }
+    
     return episode;
   }
 
@@ -109,6 +138,37 @@ export class DatabaseStorage implements IStorage {
 
   async completeFocusSession(id: number): Promise<FocusSession> {
     const [session] = await db.update(focusSessions).set({ completed: true }).where(eq(focusSessions.id, id)).returning();
+    
+    // Update streak and XP
+    const [user] = await db.select().from(users).where(eq(users.id, session.userId));
+    if (user) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      let newStreak = user.currentStreak;
+      const lastActive = user.lastActiveDate ? new Date(user.lastActiveDate) : null;
+      if (lastActive) lastActive.setHours(0, 0, 0, 0);
+
+      const diffDays = lastActive ? Math.floor((today.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24)) : null;
+
+      if (diffDays === 1) {
+        newStreak += 1;
+      } else if (diffDays === null || diffDays > 1) {
+        newStreak = 1;
+      }
+      
+      const newXp = user.xp + 10;
+      const newLevel = Math.floor(newXp / 100) + 1;
+      
+      await db.update(users).set({ 
+        xp: newXp, 
+        level: newLevel,
+        currentStreak: newStreak,
+        longestStreak: Math.max(newStreak, user.longestStreak),
+        lastActiveDate: new Date()
+      }).where(eq(users.id, user.id));
+    }
+    
     return session;
   }
 

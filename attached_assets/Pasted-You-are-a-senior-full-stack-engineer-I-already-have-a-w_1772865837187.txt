@@ -1,0 +1,275 @@
+You are a senior full-stack engineer.
+
+I already have a working web application called **CodeFlix** built with React + Vite and a Node.js backend.
+The application allows users to add YouTube learning videos and use a focus timer.
+
+Your task is to UPGRADE the system with new features that improve concentration and make the platform addictive and progress-driven.
+
+Do NOT rebuild the project.
+Instead, modify and extend the existing architecture.
+
+The UI must remain modern, dark-themed, and consistent with the current design.
+
+---
+
+CORE FEATURE UPGRADES
+
+1. VIDEO → EPISODE GENERATOR
+
+When a user adds a YouTube video link:
+
+Example:
+https://youtube.com/watch?v=xxxx
+
+The backend should:
+
+1. extract the YouTube video ID
+2. fetch video metadata using YouTube API
+
+   * title
+   * thumbnail
+   * duration
+
+Then automatically break the video into **learning episodes**.
+
+Example:
+
+Video duration = 60 minutes
+
+Generate episodes:
+
+Episode 1 – Watch 0–8 minutes
+Episode 2 – Watch 8–16 minutes
+Episode 3 – Watch 16–24 minutes
+Episode 4 – Watch 24–32 minutes
+
+Each episode must store:
+
+episodeId
+videoId
+startTime
+endTime
+completed (boolean)
+
+Frontend must show a list of episodes and unlock them sequentially.
+
+---
+
+2. VIDEO PROGRESS RESUME SYSTEM
+
+Track user watching progress.
+
+Database fields:
+
+userId
+videoId
+lastWatchedTimestamp
+completedEpisodes
+totalWatchTime
+
+Every few seconds the frontend should send progress updates to the backend.
+
+When the user reopens the video page:
+
+Show button:
+
+"Resume from 12:47"
+
+Video player should start from the stored timestamp.
+
+---
+
+3. FOCUS SESSION TRACKING
+
+Integrate the focus timer with the backend.
+
+When user presses START:
+
+create a focus session record.
+
+Fields:
+
+sessionId
+userId
+duration
+completed
+date
+
+When timer finishes:
+
+mark session as completed.
+
+Store:
+
+focusMinutes
+sessionsCompleted
+
+---
+
+4. DAILY STREAK SYSTEM
+
+Implement a streak system.
+
+Rules:
+
+If user completes at least **10 minutes of focus in a day**
+→ increase streak by 1.
+
+If user skips a day
+→ streak resets to 0.
+
+Store in database:
+
+userId
+currentStreak
+longestStreak
+lastActiveDate
+
+Show streak on dashboard:
+
+🔥 5 Day Streak
+
+---
+
+5. XP AND LEVEL SYSTEM
+
+Add gamification.
+
+When user completes:
+
+Focus session → +10 XP
+Episode → +5 XP
+Video completion → +50 XP
+
+Level formula:
+
+level = floor(xp / 100)
+
+Display on dashboard:
+
+Level 3 Learner
+XP Progress Bar
+
+---
+
+6. STORY UNLOCK SYSTEM
+
+The Story Journey page should unlock content based on focus time.
+
+Create story chapters.
+
+Database table:
+
+chapterId
+chapterNumber
+textContent
+
+User progress table:
+
+userId
+chapterUnlocked
+
+Unlock rules:
+
+10 minutes focus → unlock paragraph
+30 minutes focus → unlock scene
+60 minutes focus → unlock next chapter
+
+Show locked chapters visually.
+
+---
+
+7. FOCUS LOCK MODE
+
+Detect distraction.
+
+Frontend must monitor:
+
+document.visibilityState
+window blur
+
+If user leaves tab during focus session:
+
+pause timer
+show warning
+
+If repeated:
+
+mark session as failed.
+
+---
+
+8. VIDEO WATCH PAGE
+
+Create a dedicated page when a user clicks a video card.
+
+Layout should include:
+
+YouTube embedded player
+Resume button
+Episode list
+Episode progress tracker
+Notes panel (optional)
+
+Episode currently active should be highlighted.
+
+---
+
+9. DASHBOARD IMPROVEMENTS
+
+Upgrade dashboard to show:
+
+Total focus time
+Daily streak
+Current level and XP bar
+Episodes completed
+Videos in progress
+Today's study goal
+
+---
+
+10. ANALYTICS PAGE
+
+Create a simple analytics section.
+
+Show:
+
+Total hours studied
+Total sessions completed
+Videos completed
+Average focus duration
+
+---
+
+DATABASE STRUCTURE
+
+Add tables:
+
+Users
+Videos
+Episodes
+VideoProgress
+FocusSessions
+UserStreaks
+UserXP
+StoryChapters
+UserStoryProgress
+
+---
+
+OUTPUT REQUIREMENTS
+
+Update the existing project and generate:
+
+1. new backend API routes
+2. updated database schema
+3. React components for episodes and progress
+4. dashboard improvements
+5. focus session tracking
+6. story unlock logic
+
+Do NOT remove existing features.
+
+Ensure everything works together synchronously between frontend and backend.
+
+Write clean modular code and keep the current UI style.
