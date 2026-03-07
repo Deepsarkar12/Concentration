@@ -13,10 +13,10 @@ export function useAuth() {
     queryFn: async () => {
       const token = localStorage.getItem("token");
       if (!token) return null;
-      
+
       const res = await authFetch(api.auth.me.path);
       if (!res.ok) return null;
-      
+
       return parseResponse(res, api.auth.me.responses[200]);
     },
     retry: false,
@@ -58,10 +58,10 @@ export function useLogin() {
       toast({ title: "Welcome back!", description: "Successfully logged in." });
     },
     onError: (error: Error) => {
-      toast({ 
-        title: "Login failed", 
-        description: error.message, 
-        variant: "destructive" 
+      toast({
+        title: "Login failed",
+        description: error.message,
+        variant: "destructive"
       });
     }
   });
@@ -87,10 +87,38 @@ export function useSignup() {
       toast({ title: "Account created!", description: "Welcome to CodeFlix." });
     },
     onError: (error: Error) => {
-      toast({ 
-        title: "Signup failed", 
-        description: error.message, 
-        variant: "destructive" 
+      toast({
+        title: "Signup failed",
+        description: error.message,
+        variant: "destructive"
+      });
+    }
+  });
+}
+
+export function useDeleteAccount() {
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const res = await authFetch(api.auth.delete.path, {
+        method: api.auth.delete.method,
+      });
+      return parseResponse(res, api.auth.delete.responses[200]);
+    },
+    onSuccess: () => {
+      localStorage.removeItem("token");
+      queryClient.clear();
+      setLocation("/login");
+      toast({ title: "Account Deleted", description: "Your data has been permanently removed." });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete account",
+        description: error.message,
+        variant: "destructive"
       });
     }
   });

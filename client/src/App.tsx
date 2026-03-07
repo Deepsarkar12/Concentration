@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import WatchVideo from "./pages/WatchVideo";
 import FocusRoom from "./pages/FocusRoom";
 import StoryJourney from "./pages/StoryJourney";
+import Analytics from "./pages/Analytics";
 import NotFound from "./pages/not-found";
 
 // Layout & Guards
@@ -22,7 +23,7 @@ function Router() {
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/signup" component={Signup} />
-      
+
       {/* Protected Routes wrapped in Layout */}
       <Route path="/">
         <ProtectedRoute>
@@ -31,7 +32,7 @@ function Router() {
           </AppLayout>
         </ProtectedRoute>
       </Route>
-      
+
       <Route path="/watch/:id">
         <ProtectedRoute>
           <AppLayout>
@@ -56,17 +57,29 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/analytics">
+        <ProtectedRoute>
+          <AppLayout>
+            <Analytics />
+          </AppLayout>
+        </ProtectedRoute>
+      </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
 }
 
+import { FocusProvider } from "./contexts/FocusContext";
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Router />
+        <FocusProvider>
+          <Toaster />
+          <Router />
+        </FocusProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

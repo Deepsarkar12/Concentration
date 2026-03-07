@@ -1,13 +1,8 @@
 import { db } from "./db";
 import {
-  users, type User, type InsertUser,
-  videos, type Video,
-  progress, type Progress,
-  episodes, type Episode,
-  focusSessions, type FocusSession,
-  stories, type Story,
-  userStoryProgress, type UserStoryProgress
+  users, videos, progress, focusSessions, stories, userStoryProgress
 } from "@shared/schema";
+import type { User, InsertUser, Video, Progress, FocusSession, Story, UserStoryProgress } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
@@ -15,7 +10,8 @@ export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  
+  deleteUser(id: number): Promise<boolean>;
+
   // Videos
   getVideos(userId: number): Promise<Video[]>;
   addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string, thumbnailUrl?: string, duration?: number): Promise<Video>;
@@ -23,11 +19,8 @@ export interface IStorage {
 
   // Progress
   getProgress(userId: number, videoId: number): Promise<Progress | undefined>;
-  updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number, totalWatchTime: number): Promise<Progress>;
-
-  // Episodes
-  getEpisodes(videoId: number): Promise<Episode[]>;
-  completeEpisode(id: number): Promise<Episode>;
+  updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number[], totalWatchTime: number): Promise<Progress>;
+  completeDynamicEpisode(userId: number, videoId: number, episodeNumber: number): Promise<Progress | undefined>;
 
   // Focus
   startFocusSession(userId: number, duration: number): Promise<FocusSession>;
@@ -40,6 +33,21 @@ export interface IStorage {
   // Story
   getUnlockedStories(userId: number): Promise<Story[]>;
   unlockNextChapter(userId: number): Promise<void>;
+
+  // Analytics
+  getAnalytics(userId: number): Promise<{
+    totalHours: number,
+    totalSessions: number,
+    videosCompleted: number,
+    avgFocusDuration: number,
+    activeCourses: Array<{
+      id: number,
+      title: string,
+      completion: number,
+      episodesCompleted: number,
+      totalEpisodes: number
+    }>
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -47,7 +55,7 @@ export class DatabaseStorage implements IStorage {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
-  
+
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
     return user;
@@ -58,29 +66,34 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async deleteUser(id: number): Promise<boolean> {
+    // Manually cascade since sqlite doesn't always enforce it at ORM level cleanly without setup
+    await db.delete(progress).where(eq(progress.userId, id));
+    await db.delete(focusSessions).where(eq(focusSessions.userId, id));
+    await db.delete(userStoryProgress).where(eq(userStoryProgress.userId, id));
+
+    // Find all videos to delete them
+    await db.delete(videos).where(eq(videos.userId, id));
+
+    // Finally delete user
+    const result = await db.delete(users).where(eq(users.id, id)).returning();
+    return result.length > 0;
+  }
+
   async getVideos(userId: number): Promise<Video[]> {
     return await db.select().from(videos).where(eq(videos.userId, userId));
   }
 
   async addVideo(userId: number, youtubeUrl: string, youtubeVideoId: string, title: string, thumbnailUrl?: string, duration?: number): Promise<Video> {
     const [video] = await db.insert(videos).values({ userId, youtubeUrl, youtubeVideoId, title, thumbnailUrl, duration }).returning();
-    
-    // Auto-generate episodes if duration exists
-    if (duration && duration > 0) {
-      const episodeDuration = 480; // 8 minutes in seconds
-      const numEpisodes = Math.ceil(duration / episodeDuration);
-      for (let i = 0; i < numEpisodes; i++) {
-        await db.insert(episodes).values({
-          videoId: video.id,
-          episodeNumber: i + 1,
-          title: `Episode ${i + 1}`,
-          startTime: i * episodeDuration,
-          endTime: Math.min((i + 1) * episodeDuration, duration),
-          completed: false
-        });
-      }
-    }
-    
+
+    // Also initialize progress array to empty
+    await db.insert(progress).values({
+      userId,
+      videoId: video.id,
+      completedEpisodes: []
+    });
+
     return video;
   }
 
@@ -94,7 +107,7 @@ export class DatabaseStorage implements IStorage {
     return prog;
   }
 
-  async updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number, totalWatchTime: number): Promise<Progress> {
+  async updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number[], totalWatchTime: number): Promise<Progress> {
     const existing = await this.getProgress(userId, videoId);
     if (existing) {
       const [updated] = await db.update(progress)
@@ -110,25 +123,45 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getEpisodes(videoId: number): Promise<Episode[]> {
-    return await db.select().from(episodes).where(eq(episodes.videoId, videoId)).orderBy(episodes.episodeNumber);
-  }
+  async completeDynamicEpisode(userId: number, videoId: number, episodeNumber: number): Promise<Progress | undefined> {
+    let prog = await this.getProgress(userId, videoId);
 
-  async completeEpisode(id: number): Promise<Episode> {
-    const [episode] = await db.update(episodes).set({ completed: true }).where(eq(episodes.id, id)).returning();
-    
-    // Add XP for episode completion
-    const [video] = await db.select().from(videos).where(eq(videos.id, episode.videoId));
-    if (video) {
-      const [user] = await db.select().from(users).where(eq(users.id, video.userId));
-      if (user) {
-        const newXp = user.xp + 5;
-        const newLevel = Math.floor(newXp / 100) + 1;
-        await db.update(users).set({ xp: newXp, level: newLevel }).where(eq(users.id, user.id));
-      }
+    // Create progress if it doesn't exist
+    if (!prog) {
+      const [newProg] = await db.insert(progress)
+        .values({ userId, videoId, completedEpisodes: [] })
+        .returning();
+      prog = newProg;
     }
-    
-    return episode;
+
+    // Only update and award XP if it's the first time
+    if (!prog.completedEpisodes.includes(episodeNumber)) {
+      const newCompleted = [...prog.completedEpisodes, episodeNumber];
+      const [updatedProg] = await db.update(progress)
+        .set({ completedEpisodes: newCompleted })
+        .where(eq(progress.id, prog.id))
+        .returning();
+
+      // Give XP
+      const [video] = await db.select().from(videos).where(eq(videos.id, videoId));
+      if (video) {
+        const totalEpisodes = video.duration ? Math.ceil(video.duration / 480) : 0;
+        const allCompleted = totalEpisodes > 0 && newCompleted.length >= totalEpisodes;
+
+        const xpGain = allCompleted ? 55 : 5; // Big bonus if the entire video is finished
+
+        const [user] = await db.select().from(users).where(eq(users.id, userId));
+        if (user) {
+          const newXp = user.xp + xpGain;
+          const newLevel = Math.floor(newXp / 400) + 1;
+          await db.update(users).set({ xp: newXp, level: newLevel }).where(eq(users.id, user.id));
+        }
+      }
+
+      return updatedProg;
+    }
+
+    return prog;
   }
 
   async startFocusSession(userId: number, duration: number): Promise<FocusSession> {
@@ -138,13 +171,13 @@ export class DatabaseStorage implements IStorage {
 
   async completeFocusSession(id: number): Promise<FocusSession> {
     const [session] = await db.update(focusSessions).set({ completed: true }).where(eq(focusSessions.id, id)).returning();
-    
+
     // Update streak and XP
     const [user] = await db.select().from(users).where(eq(users.id, session.userId));
     if (user) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       let newStreak = user.currentStreak;
       const lastActive = user.lastActiveDate ? new Date(user.lastActiveDate) : null;
       if (lastActive) lastActive.setHours(0, 0, 0, 0);
@@ -156,19 +189,51 @@ export class DatabaseStorage implements IStorage {
       } else if (diffDays === null || diffDays > 1) {
         newStreak = 1;
       }
-      
+
       const newXp = user.xp + 10;
-      const newLevel = Math.floor(newXp / 100) + 1;
-      
-      await db.update(users).set({ 
-        xp: newXp, 
+      const newLevel = Math.floor(newXp / 400) + 1;
+
+      await db.update(users).set({
+        xp: newXp,
         level: newLevel,
         currentStreak: newStreak,
         longestStreak: Math.max(newStreak, user.longestStreak),
         lastActiveDate: new Date()
       }).where(eq(users.id, user.id));
+
+      // Calculate today's total focus time
+      const todaysSessions = await db.select().from(focusSessions)
+        .where(and(
+          eq(focusSessions.userId, user.id),
+          eq(focusSessions.completed, true)
+        ));
+
+      const totalFocusToday = todaysSessions
+        .filter(s => s.date && s.date >= today)
+        .reduce((acc, curr) => acc + curr.duration, 0);
+
+      const [userProgress] = await db.select().from(userStoryProgress).where(eq(userStoryProgress.userId, user.id));
+      const currentChapter = userProgress ? userProgress.chapterUnlocked : 0;
+
+      // Story Unlock Rules: 10 mins -> Chap 1, 30 mins -> Chap 2, 60 mins -> Chap 3
+      let newChapter = currentChapter;
+      const totalFocusMins = Math.floor(totalFocusToday / 60);
+
+      if (totalFocusMins >= 60 && currentChapter < 3) newChapter = 3;
+      else if (totalFocusMins >= 30 && currentChapter < 2) newChapter = 2;
+      else if (totalFocusMins >= 10 && currentChapter < 1) newChapter = 1;
+
+      if (newChapter > currentChapter) {
+        if (userProgress) {
+          await db.update(userStoryProgress)
+            .set({ chapterUnlocked: newChapter })
+            .where(eq(userStoryProgress.id, userProgress.id));
+        } else {
+          await db.insert(userStoryProgress).values({ userId: user.id, chapterUnlocked: newChapter });
+        }
+      }
     }
-    
+
     return session;
   }
 
@@ -188,7 +253,7 @@ export class DatabaseStorage implements IStorage {
   async getUnlockedStories(userId: number): Promise<Story[]> {
     const [userProgress] = await db.select().from(userStoryProgress).where(eq(userStoryProgress.userId, userId));
     const maxChapter = userProgress ? userProgress.chapterUnlocked : 0;
-    
+
     const allStories = await db.select().from(stories);
     return allStories.filter(s => s.chapterNumber <= maxChapter);
   }
@@ -202,6 +267,61 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(userStoryProgress).values({ userId, chapterUnlocked: 1 });
     }
+  }
+
+  async getAnalytics(userId: number): Promise<{
+    totalHours: number,
+    totalSessions: number,
+    videosCompleted: number,
+    avgFocusDuration: number,
+    activeCourses: Array<{
+      id: number,
+      title: string,
+      completion: number,
+      episodesCompleted: number,
+      totalEpisodes: number
+    }>
+  }> {
+    const sessions = await db.select().from(focusSessions).where(and(eq(focusSessions.userId, userId), eq(focusSessions.completed, true)));
+    const totalTimeMins = sessions.reduce((acc, curr) => acc + curr.duration, 0);
+    const totalHours = Math.round((totalTimeMins / 60) * 10) / 10;
+    const totalSessions = sessions.length;
+    const avgFocusDuration = totalSessions > 0 ? Math.round(totalTimeMins / totalSessions) : 0;
+
+    const userVideos = await db.select().from(videos).where(eq(videos.userId, userId));
+
+    let videosCompletedCount = 0;
+    const activeCourses = [];
+
+    for (const video of userVideos) {
+      const vidProg = await db.select().from(progress).where(eq(progress.videoId, video.id));
+      const userVidProg = vidProg.find(p => p.userId === userId);
+
+      const totalEpisodes = video.duration ? Math.ceil(video.duration / 480) : 0;
+      const episodesCompleted = userVidProg ? userVidProg.completedEpisodes.length : 0;
+
+      const completion = totalEpisodes > 0 ? Math.round((episodesCompleted / totalEpisodes) * 100) : 0;
+
+      if (totalEpisodes > 0 && episodesCompleted >= totalEpisodes) {
+        videosCompletedCount++;
+      } else if (episodesCompleted > 0) {
+        activeCourses.push({
+          id: video.id,
+          title: video.title,
+          completion,
+          episodesCompleted,
+          totalEpisodes
+        });
+      }
+    }
+
+    return {
+      totalHours,
+      totalSessions,
+      videosCompleted: videosCompletedCount,
+      avgFocusDuration,
+      activeCourses
+    };
   }
 }
 

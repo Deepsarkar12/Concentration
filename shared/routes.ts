@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { 
+import {
   insertUserSchema, users,
   insertVideoSchema, videos,
   insertProgressSchema, progress,
-  insertEpisodeSchema, episodes,
   insertFocusSessionSchema, focusSessions,
   stories, userStoryProgress
 } from './schema';
@@ -42,6 +41,14 @@ export const api = {
         200: z.custom<typeof users.$inferSelect>(),
         401: errorSchemas.unauthorized,
       }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/auth/me' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+      }
     }
   },
   videos: {
@@ -77,11 +84,11 @@ export const api = {
     update: {
       method: 'POST' as const,
       path: '/api/progress/update' as const,
-      input: z.object({ 
-        videoId: z.coerce.number(), 
-        lastWatchedTimestamp: z.coerce.number(), 
-        completedEpisodes: z.coerce.number(), 
-        totalWatchTime: z.coerce.number() 
+      input: z.object({
+        videoId: z.coerce.number(),
+        lastWatchedTimestamp: z.coerce.number(),
+        completedEpisodes: z.array(z.number()),
+        totalWatchTime: z.coerce.number()
       }),
       responses: {
         200: z.custom<typeof progress.$inferSelect>(),
@@ -96,23 +103,16 @@ export const api = {
         404: errorSchemas.notFound,
         401: errorSchemas.unauthorized,
       }
-    }
-  },
-  episodes: {
-    list: {
-      method: 'GET' as const,
-      path: '/api/episodes/:videoId' as const,
-      responses: {
-        200: z.array(z.custom<typeof episodes.$inferSelect>()),
-        401: errorSchemas.unauthorized,
-      }
     },
-    complete: {
+    completeEpisode: {
       method: 'POST' as const,
-      path: '/api/episodes/complete' as const,
-      input: z.object({ episodeId: z.coerce.number() }),
+      path: '/api/progress/complete-episode' as const,
+      input: z.object({
+        videoId: z.coerce.number(),
+        episodeNumber: z.coerce.number()
+      }),
       responses: {
-        200: z.custom<typeof episodes.$inferSelect>(),
+        200: z.custom<typeof progress.$inferSelect>(),
         401: errorSchemas.unauthorized,
       }
     }
@@ -161,6 +161,28 @@ export const api = {
       path: '/api/story/unlocked' as const,
       responses: {
         200: z.array(z.custom<typeof stories.$inferSelect>()),
+        401: errorSchemas.unauthorized,
+      }
+    }
+  },
+  analytics: {
+    get: {
+      method: 'GET' as const,
+      path: '/api/analytics' as const,
+      responses: {
+        200: z.object({
+          totalHours: z.number(),
+          totalSessions: z.number(),
+          videosCompleted: z.number(),
+          avgFocusDuration: z.number(),
+          activeCourses: z.array(z.object({
+            id: z.number(),
+            title: z.string(),
+            completion: z.number(),
+            episodesCompleted: z.number(),
+            totalEpisodes: z.number()
+          }))
+        }),
         401: errorSchemas.unauthorized,
       }
     }
