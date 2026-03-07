@@ -40,8 +40,8 @@ export const episodes = pgTable("episodes", {
   videoId: integer("video_id").notNull(),
   episodeNumber: integer("episode_number").notNull(),
   title: text("title").notNull(),
-  startTime: integer("start_time").notNull(), // in seconds
-  endTime: integer("end_time").notNull(), // in seconds
+  startTime: integer("start_time").notNull(),
+  endTime: integer("end_time").notNull(),
   completed: boolean("completed").default(false).notNull(),
 });
 
