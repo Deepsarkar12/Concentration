@@ -19,7 +19,8 @@ export interface IStorage {
 
   // Progress
   getProgress(userId: number, videoId: number): Promise<Progress | undefined>;
-  updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number[], totalWatchTime: number): Promise<Progress>;
+  createProgress(userId: number, videoId: number): Promise<Progress>;
+  updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, maxWatchedTime: number, completedEpisodes: number[], unlockedEpisodes: number[], totalWatchTime: number): Promise<Progress>;
   completeDynamicEpisode(userId: number, videoId: number, episodeNumber: number): Promise<Progress | undefined>;
 
   // Focus
@@ -117,17 +118,24 @@ export class DatabaseStorage implements IStorage {
     return prog;
   }
 
-  async updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, completedEpisodes: number[], totalWatchTime: number): Promise<Progress> {
+  async createProgress(userId: number, videoId: number): Promise<Progress> {
+    const [newProg] = await db.insert(progress)
+      .values({ userId, videoId, completedEpisodes: [], unlockedEpisodes: [1] })
+      .returning();
+    return newProg;
+  }
+
+  async updateProgress(userId: number, videoId: number, lastWatchedTimestamp: number, maxWatchedTime: number, completedEpisodes: number[], unlockedEpisodes: number[], totalWatchTime: number): Promise<Progress> {
     const existing = await this.getProgress(userId, videoId);
     if (existing) {
       const [updated] = await db.update(progress)
-        .set({ lastWatchedTimestamp, completedEpisodes, totalWatchTime })
+        .set({ lastWatchedTimestamp, maxWatchedTime, completedEpisodes, unlockedEpisodes, totalWatchTime })
         .where(eq(progress.id, existing.id))
         .returning();
       return updated;
     } else {
       const [newProg] = await db.insert(progress)
-        .values({ userId, videoId, lastWatchedTimestamp, completedEpisodes, totalWatchTime })
+        .values({ userId, videoId, lastWatchedTimestamp, maxWatchedTime, completedEpisodes, unlockedEpisodes, totalWatchTime })
         .returning();
       return newProg;
     }

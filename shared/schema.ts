@@ -31,7 +31,9 @@ export const progress = pgTable("progress", {
   userId: integer("user_id").notNull(),
   videoId: integer("video_id").notNull(),
   lastWatchedTimestamp: integer("last_watched_timestamp").default(0).notNull(),
+  maxWatchedTime: integer("max_watched_time").default(0).notNull(),
   completedEpisodes: integer("completed_episodes").array().default([]).notNull(),
+  unlockedEpisodes: integer("unlocked_episodes").array().default([1]).notNull(),
   totalWatchTime: integer("total_watch_time").default(0).notNull(),
 });
 

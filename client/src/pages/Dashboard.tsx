@@ -25,7 +25,23 @@ export default function Dashboard() {
 
   const handleAddVideo = (e: React.FormEvent) => {
     e.preventDefault();
-    addVideo.mutate({ youtubeUrl: url, title }, {
+
+    // Simple regex to extract YouTube video ID
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    const videoId = (match && match[2].length === 11) ? match[2] : null;
+
+    if (!videoId) {
+      alert("Please enter a valid YouTube URL");
+      return;
+    }
+
+    addVideo.mutate({
+      youtubeUrl: url,
+      youtubeVideoId: videoId,
+      title,
+      thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+    }, {
       onSuccess: () => {
         setDialogOpen(false);
         setUrl("");

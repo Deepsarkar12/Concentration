@@ -56,14 +56,24 @@ export function QuizPanel({ videoId, episodeIndex, onComplete }: { videoId: numb
                 </CardHeader>
                 <CardContent className="flex flex-col items-center gap-4">
                     <p className="text-xl">Score: {results.score}%</p>
-                    {results.passed && (
+                    {results.passed ? (
                         <p className="text-green-500 font-bold">You earned +{results.xpEarned} XP!</p>
-                    )}
-                    {!results.passed && (
-                        <p className="text-muted-foreground text-center">You need 60% to pass and unlock the next episode.</p>
+                    ) : (
+                        <div className="space-y-4 w-full mt-4">
+                            <p className="text-destructive text-center font-medium">You need 60% to pass and unlock the next episode.</p>
+                            <div className="bg-secondary/20 p-4 rounded-xl space-y-3 max-h-60 overflow-y-auto">
+                                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Quick Review:</p>
+                                {quizData.questions.map((q: any, i: number) => (
+                                    <div key={q.id} className="text-xs border-l-2 border-primary/20 pl-2">
+                                        <p className="font-semibold">{i + 1}. {q.question}</p>
+                                        <p className="text-muted-foreground mt-1 italic">{q.explanation}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     )}
                     <Button onClick={onComplete} className="mt-4">
-                        {results.passed ? "Continue to Next Episode" : "Close and Retry Later"}
+                        {results.passed ? "Continue to Next Episode" : "Go Back to Video"}
                     </Button>
                 </CardContent>
             </Card>

@@ -61,6 +61,7 @@ export function useSubmitQuiz() {
     },
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.episodes.list.path, variables.videoId] });
+      queryClient.invalidateQueries({ queryKey: [api.progress.get.path, variables.videoId] });
       queryClient.invalidateQueries({ queryKey: [api.auth.me.path] }); // To update XP
       if (data.passed) {
         toast({ title: `Quiz passed! You earned ${data.xpEarned} XP.` });

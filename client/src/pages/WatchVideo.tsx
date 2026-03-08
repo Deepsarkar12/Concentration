@@ -34,32 +34,67 @@ export default function WatchVideo() {
   const [notesText, setNotesText] = useState('');
   const [activeQuizEpisode, setActiveQuizEpisode] = useState<number | null>(null);
 
+  const maxTimeRef = useRef(0);
+  const lastCompletedEpisodeRef = useRef<number | null>(null);
+
   // Sync progress and auto-complete episodes
   useEffect(() => {
-    if (!playerRef.current) return;
+    if (!playerRef.current || !progressData) return;
+
+    // Initialize maxTimeRef from DB once
+    if (maxTimeRef.current === 0 && progressData.maxWatchedTime) {
+      maxTimeRef.current = progressData.maxWatchedTime;
+    }
 
     const interval = setInterval(async () => {
       try {
-        const time = await playerRef.current.getCurrentTime();
+        const time = Math.floor(await playerRef.current.getCurrentTime());
         setCurrentTime(time);
 
+        // STRICT SEEK CONTROL: Prevent skipping ahead
+        if (time > maxTimeRef.current + 2) {
+          playerRef.current.seekTo(maxTimeRef.current);
+          return;
+        }
+
+        // Update local max time as we watch
+        if (time > maxTimeRef.current) {
+          maxTimeRef.current = time;
+        }
+
         // Auto-save progress every 10 seconds
-        if (isPlaying && Math.floor(time) % 10 === 0) {
+        if (isPlaying && time % 10 === 0) {
           updateProgress.mutate({
             videoId,
-            lastWatchedTimestamp: Math.floor(time),
-            completedEpisodes: progressData?.completedEpisodes || [],
-            totalWatchTime: (progressData?.totalWatchTime || 0) + 10
+            lastWatchedTimestamp: time,
+            maxWatchedTime: maxTimeRef.current,
+            completedEpisodes: progressData.completedEpisodes || [],
+            unlockedEpisodes: progressData.unlockedEpisodes || [1],
+            totalWatchTime: (progressData.totalWatchTime || 0) + 10
           });
         }
 
         // Check for episode completion to trigger quiz
         if (episodes.length > 0) {
-          const currentEpisode = episodes.find(e => time >= e.startTime && time < e.endTime);
-
+          const currentEpisode = episodes.find(e => time >= e.startTime && time <= e.endTime);
           if (currentEpisode) {
-            // Check if we reached the last 10 seconds of the episode
-            if (time >= currentEpisode.endTime - 10 && !currentEpisode.completed && activeQuizEpisode !== currentEpisode.episodeNumber) {
+            // MARK COMPLETED: last 5 seconds
+            if (time >= currentEpisode.endTime - 5 && !currentEpisode.completed && lastCompletedEpisodeRef.current !== currentEpisode.episodeNumber) {
+              lastCompletedEpisodeRef.current = currentEpisode.episodeNumber;
+              // Update locally and on backend
+              const updatedCompleted = Array.from(new Set([...(progressData.completedEpisodes || []), currentEpisode.episodeNumber]));
+              updateProgress.mutate({
+                videoId,
+                lastWatchedTimestamp: time,
+                maxWatchedTime: maxTimeRef.current,
+                completedEpisodes: updatedCompleted,
+                unlockedEpisodes: progressData.unlockedEpisodes || [1],
+                totalWatchTime: progressData.totalWatchTime || 0
+              });
+            }
+
+            // TRIGGER QUIZ: Show button or auto-open if just completed
+            if (time >= currentEpisode.endTime - 5 && !currentEpisode.completed && activeQuizEpisode !== currentEpisode.episodeNumber) {
               setActiveQuizEpisode(currentEpisode.episodeNumber);
               setActiveTab('quiz');
               playerRef.current.pauseVideo();
@@ -69,10 +104,18 @@ export default function WatchVideo() {
       } catch (err) {
         console.error("Error polling player time:", err);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [isPlaying, videoId, progressData, episodes, activeQuizEpisode]);
+
+  const onStateChange = async (event: any) => {
+    // If user tries to seek ahead manually (State 3 is buffering, but we check time)
+    const time = Math.floor(await playerRef.current.getCurrentTime());
+    if (time > maxTimeRef.current + 2) {
+      playerRef.current.seekTo(maxTimeRef.current);
+    }
+  };
 
   const onReady = (event: any) => {
     playerRef.current = event.target;
@@ -118,6 +161,7 @@ export default function WatchVideo() {
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
               onEnd={() => setIsPlaying(false)}
+              onStateChange={onStateChange}
             />
             {/* Render Note Markers on Timeline (visual approximation at bottom) */}
             {notesData && notesData.length > 0 && video.duration && (
@@ -235,6 +279,19 @@ export default function WatchVideo() {
                           <p className="text-xs opacity-70">
                             {formatTime(episode.startTime)} — {formatTime(episode.endTime)}
                           </p>
+                          {isCompleted && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveQuizEpisode(episode.episodeNumber);
+                                setActiveTab('quiz');
+                                if (playerRef.current) playerRef.current.pauseVideo();
+                              }}
+                              className="mt-2 text-xs bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded border border-primary/20 transition-colors"
+                            >
+                              Take Quiz
+                            </button>
+                          )}
                         </div>
                       </button>
                     );

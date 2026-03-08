@@ -57,7 +57,13 @@ export const api = {
     add: {
       method: 'POST' as const,
       path: '/api/videos/add' as const,
-      input: z.object({ youtubeUrl: z.string(), title: z.string() }),
+      input: z.object({
+        youtubeUrl: z.string(),
+        youtubeVideoId: z.string(),
+        title: z.string(),
+        thumbnailUrl: z.string().optional(),
+        duration: z.number().optional()
+      }),
       responses: {
         201: z.custom<typeof videos.$inferSelect>(),
         400: errorSchemas.validation,
@@ -89,7 +95,9 @@ export const api = {
       input: z.object({
         videoId: z.coerce.number(),
         lastWatchedTimestamp: z.coerce.number(),
+        maxWatchedTime: z.coerce.number(),
         completedEpisodes: z.array(z.number()),
+        unlockedEpisodes: z.array(z.number()),
         totalWatchTime: z.coerce.number()
       }),
       responses: {
