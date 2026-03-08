@@ -4,7 +4,9 @@ import {
   insertVideoSchema, videos,
   insertProgressSchema, progress,
   insertFocusSessionSchema, focusSessions,
-  stories, userStoryProgress
+  stories, userStoryProgress,
+  insertNoteSchema, notes,
+  insertQuizResultSchema, quizResults
 } from './schema';
 
 export const errorSchemas = {
@@ -161,6 +163,78 @@ export const api = {
       path: '/api/story/unlocked' as const,
       responses: {
         200: z.array(z.custom<typeof stories.$inferSelect>()),
+        401: errorSchemas.unauthorized,
+      }
+    }
+  },
+  episodes: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/videos/:id/episodes' as const,
+      responses: {
+        200: z.array(z.object({
+          episodeNumber: z.number(),
+          title: z.string(),
+          startTime: z.number(),
+          endTime: z.number(),
+          unlocked: z.boolean(),
+          completed: z.boolean()
+        })),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
+      }
+    }
+  },
+  quizzes: {
+    get: {
+      method: 'GET' as const,
+      path: '/api/videos/:id/episodes/:episodeIndex/quiz' as const,
+      responses: {
+        200: z.object({
+          episodeId: z.number(),
+          questions: z.array(z.object({
+            id: z.string(),
+            question: z.string(),
+            options: z.array(z.string()),
+            correctAnswer: z.number(),
+            explanation: z.string().optional()
+          }))
+        }),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
+      }
+    },
+    submit: {
+      method: 'POST' as const,
+      path: '/api/videos/:id/episodes/:episodeIndex/quiz' as const,
+      input: z.object({
+        score: z.number(),
+        passed: z.boolean()
+      }),
+      responses: {
+        200: z.object({ xpEarned: z.number(), passed: z.boolean(), result: z.custom<typeof quizResults.$inferSelect>() }),
+        401: errorSchemas.unauthorized,
+      }
+    }
+  },
+  notes: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/videos/:id/notes' as const,
+      responses: {
+        200: z.array(z.custom<typeof notes.$inferSelect>()),
+        401: errorSchemas.unauthorized,
+      }
+    },
+    add: {
+      method: 'POST' as const,
+      path: '/api/videos/:id/notes' as const,
+      input: z.object({
+        timestamp: z.number(),
+        text: z.string()
+      }),
+      responses: {
+        201: z.custom<typeof notes.$inferSelect>(),
         401: errorSchemas.unauthorized,
       }
     }

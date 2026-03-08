@@ -1,8 +1,8 @@
 import { db } from "./db";
 import {
-  users, videos, progress, focusSessions, stories, userStoryProgress
+  users, videos, progress, focusSessions, stories, userStoryProgress, notes, quizResults
 } from "@shared/schema";
-import type { User, InsertUser, Video, Progress, FocusSession, Story, UserStoryProgress } from "@shared/schema";
+import type { User, InsertUser, Video, Progress, FocusSession, Story, UserStoryProgress, Note, QuizResult } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
@@ -33,6 +33,14 @@ export interface IStorage {
   // Story
   getUnlockedStories(userId: number): Promise<Story[]>;
   unlockNextChapter(userId: number): Promise<void>;
+
+  // Notes
+  getNotes(userId: number, videoId: number): Promise<Note[]>;
+  addNote(userId: number, videoId: number, timestamp: number, text: string): Promise<Note>;
+
+  // Quizzes
+  getQuizResult(userId: number, videoId: number, episodeIndex: number): Promise<QuizResult | undefined>;
+  addQuizResult(userId: number, videoId: number, episodeIndex: number, score: number, passed: boolean): Promise<QuizResult>;
 
   // Analytics
   getAnalytics(userId: number): Promise<{
@@ -71,6 +79,8 @@ export class DatabaseStorage implements IStorage {
     await db.delete(progress).where(eq(progress.userId, id));
     await db.delete(focusSessions).where(eq(focusSessions.userId, id));
     await db.delete(userStoryProgress).where(eq(userStoryProgress.userId, id));
+    await db.delete(notes).where(eq(notes.userId, id));
+    await db.delete(quizResults).where(eq(quizResults.userId, id));
 
     // Find all videos to delete them
     await db.delete(videos).where(eq(videos.userId, id));
@@ -267,6 +277,36 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(userStoryProgress).values({ userId, chapterUnlocked: 1 });
     }
+  }
+
+  async getNotes(userId: number, videoId: number): Promise<Note[]> {
+    return await db.select().from(notes).where(and(eq(notes.userId, userId), eq(notes.videoId, videoId))).orderBy(notes.timestamp);
+  }
+
+  async addNote(userId: number, videoId: number, timestamp: number, text: string): Promise<Note> {
+    const [note] = await db.insert(notes).values({ userId, videoId, timestamp, text }).returning();
+    return note;
+  }
+
+  async getQuizResult(userId: number, videoId: number, episodeIndex: number): Promise<QuizResult | undefined> {
+    const [result] = await db.select().from(quizResults).where(and(
+      eq(quizResults.userId, userId),
+      eq(quizResults.videoId, videoId),
+      eq(quizResults.episodeIndex, episodeIndex)
+    ));
+    return result;
+  }
+
+  async addQuizResult(userId: number, videoId: number, episodeIndex: number, score: number, passed: boolean): Promise<QuizResult> {
+    // Delete existing attempt if exists (allow retry logic)
+    await db.delete(quizResults).where(and(
+      eq(quizResults.userId, userId),
+      eq(quizResults.videoId, videoId),
+      eq(quizResults.episodeIndex, episodeIndex)
+    ));
+
+    const [result] = await db.insert(quizResults).values({ userId, videoId, episodeIndex, score, passed }).returning();
+    return result;
   }
 
   async getAnalytics(userId: number): Promise<{

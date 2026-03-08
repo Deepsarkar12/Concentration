@@ -3,27 +3,11 @@ import { useParams, useLocation, Link } from "wouter";
 import YouTube from "react-youtube";
 import { useVideos } from "@/hooks/use-videos";
 import { useProgress, useUpdateProgress } from "@/hooks/use-progress";
-import { useCompleteEpisode } from "@/hooks/use-episodes";
-import { ArrowLeft, CheckCircle2, Circle } from "lucide-react";
+import { useEpisodes, useNotes, useAddNote } from "@/hooks/use-episodes";
+import { ArrowLeft, CheckCircle2, Circle, Lock, Check } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-
-// Pure function to generate episodes
-const generateEpisodes = (video: any, episodeLength = 480) => {
-  if (!video || !video.duration) return [];
-  const totalEpisodes = Math.ceil(video.duration / episodeLength);
-  const eps = [];
-  for (let i = 1; i <= totalEpisodes; i++) {
-    const startTime = (i - 1) * episodeLength;
-    const endTime = Math.min(startTime + episodeLength, video.duration);
-    eps.push({
-      episodeNumber: i,
-      title: `Episode ${i}`,
-      startTime,
-      endTime
-    });
-  }
-  return eps;
-};
+import { QuizPanel } from "@/components/QuizPanel";
+import { KnowledgeMap } from "@/components/KnowledgeMap";
 
 export default function WatchVideo() {
   const { id } = useParams();
@@ -32,19 +16,23 @@ export default function WatchVideo() {
   const { data: videos } = useVideos();
   const video = videos?.find(v => v.id === videoId);
 
-  // Generate episodes dynamically based on video duration
-  const episodes = useMemo(() => generateEpisodes(video), [video?.duration]);
+  // Fetch episodes from API
+  const { data: episodesData } = useEpisodes(videoId);
+  const episodes = episodesData || [];
 
   const { data: progressData } = useProgress(videoId);
   const updateProgress = useUpdateProgress();
-  const completeEpisode = useCompleteEpisode();
+
+  const { data: notesData } = useNotes(videoId);
+  const addNote = useAddNote();
 
   const playerRef = useRef<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
 
-  const [activeTab, setActiveTab] = useState<'episodes' | 'notes'>('episodes');
-  const [notes, setNotes] = useState('');
+  const [activeTab, setActiveTab] = useState<'episodes' | 'notes' | 'quiz' | 'map'>('episodes');
+  const [notesText, setNotesText] = useState('');
+  const [activeQuizEpisode, setActiveQuizEpisode] = useState<number | null>(null);
 
   // Sync progress and auto-complete episodes
   useEffect(() => {
@@ -65,15 +53,17 @@ export default function WatchVideo() {
           });
         }
 
-        // Auto-complete logic based on dynamic episodes
+        // Check for episode completion to trigger quiz
         if (episodes.length > 0) {
-          const completedKeys = progressData?.completedEpisodes || [];
+          const currentEpisode = episodes.find(e => time >= e.startTime && time < e.endTime);
 
-          // If we passed the end of an episode and it's not completed, mark it
-          const passedEpisode = episodes.find(e => time >= e.endTime && !completedKeys.includes(e.episodeNumber));
-
-          if (passedEpisode) {
-            completeEpisode.mutate({ videoId, episodeNumber: passedEpisode.episodeNumber });
+          if (currentEpisode) {
+            // Check if we reached the last 10 seconds of the episode
+            if (time >= currentEpisode.endTime - 10 && !currentEpisode.completed && activeQuizEpisode !== currentEpisode.episodeNumber) {
+              setActiveQuizEpisode(currentEpisode.episodeNumber);
+              setActiveTab('quiz');
+              playerRef.current.pauseVideo();
+            }
           }
         }
       } catch (err) {
@@ -82,7 +72,7 @@ export default function WatchVideo() {
     }, 2000); // Poll every 2 seconds
 
     return () => clearInterval(interval);
-  }, [isPlaying, videoId, progressData, episodes, completeEpisode]);
+  }, [isPlaying, videoId, progressData, episodes, activeQuizEpisode]);
 
   const onReady = (event: any) => {
     playerRef.current = event.target;
@@ -122,13 +112,29 @@ export default function WatchVideo() {
             {/* @ts-ignore - react-youtube class component lacks props definition for React 18 in some IDE contexts */}
             <YouTube
               videoId={video.youtubeVideoId}
-              opts={{ width: '100%', height: '100%', playerVars: { autoplay: 0 } }}
+              opts={{ width: '100%', height: '100%', playerVars: { autoplay: 0, rel: 0 } }}
               className="absolute inset-0 w-full h-full"
               onReady={onReady}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
               onEnd={() => setIsPlaying(false)}
             />
+            {/* Render Note Markers on Timeline (visual approximation at bottom) */}
+            {notesData && notesData.length > 0 && video.duration && (
+              <div className="absolute bottom-1 left-0 right-0 h-1 bg-white/20 z-10 pointer-events-none">
+                {notesData.map(note => {
+                  const leftPos = (note.timestamp / video.duration!) * 100;
+                  return (
+                    <div
+                      key={note.id}
+                      className="absolute top-0 bottom-0 w-1.5 bg-primary rounded-full transform -translate-x-1/2"
+                      style={{ left: `${leftPos}%` }}
+                      title={`Note at ${formatTime(note.timestamp)}: ${note.text}`}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="flex justify-between items-start">
             <div>
@@ -169,6 +175,20 @@ export default function WatchVideo() {
               >
                 My Notes
               </button>
+              {activeQuizEpisode && (
+                <button
+                  onClick={() => setActiveTab('quiz')}
+                  className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'quiz' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'}`}
+                >
+                  Quiz
+                </button>
+              )}
+              <button
+                onClick={() => setActiveTab('map')}
+                className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeTab === 'map' ? 'border-b-2 border-primary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'}`}
+              >
+                Map
+              </button>
             </div>
 
             <div className="overflow-y-auto p-2 space-y-1 flex-1">
@@ -176,23 +196,31 @@ export default function WatchVideo() {
                 <>
                   {episodes.length ? episodes.map((episode) => {
                     const isCurrent = currentTime >= episode.startTime && currentTime < episode.endTime;
-                    const isCompleted = (progressData?.completedEpisodes || []).includes(episode.episodeNumber);
+                    const isCompleted = episode.completed;
+                    const isUnlocked = episode.unlocked;
 
                     return (
                       <button
                         key={episode.episodeNumber}
                         onClick={() => {
-                          if (playerRef.current) playerRef.current.seekTo(episode.startTime);
+                          if (isUnlocked && playerRef.current) {
+                            playerRef.current.seekTo(episode.startTime);
+                          }
                         }}
+                        disabled={!isUnlocked}
                         className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all text-left ${isCurrent
                           ? "bg-primary/20 border border-primary/50 text-foreground ring-1 ring-primary/30"
                           : isCompleted
                             ? "bg-primary/5 text-foreground/80"
-                            : "hover:bg-secondary text-muted-foreground hover:text-foreground"
+                            : !isUnlocked
+                              ? "opacity-60 bg-muted/30 cursor-not-allowed"
+                              : "hover:bg-secondary text-muted-foreground hover:text-foreground"
                           }`}
                       >
                         {isCompleted ? (
                           <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0" />
+                        ) : !isUnlocked ? (
+                          <Lock className="w-5 h-5 flex-shrink-0 opacity-50" />
                         ) : isCurrent ? (
                           <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
                             <div className="w-2 h-2 bg-primary rounded-full animate-ping" />
@@ -216,15 +244,65 @@ export default function WatchVideo() {
                     </div>
                   )}
                 </>
+              ) : activeTab === 'quiz' && activeQuizEpisode ? (
+                <div className="p-4 h-full">
+                  <QuizPanel
+                    videoId={videoId}
+                    episodeIndex={activeQuizEpisode}
+                    onComplete={() => {
+                      setActiveTab('episodes');
+                      setActiveQuizEpisode(null);
+                      if (playerRef.current) {
+                        playerRef.current.playVideo();
+                      }
+                    }}
+                  />
+                </div>
+              ) : activeTab === 'map' ? (
+                <KnowledgeMap episodes={episodes} />
               ) : (
                 <div className="p-4 h-full flex flex-col">
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Take notes while you watch..."
-                    className="flex-1 w-full bg-transparent resize-none outline-none text-sm leading-relaxed"
-                  />
-                  <p className="text-xs text-muted-foreground mt-4 text-center">Notes are saved automatically to your device.</p>
+                  <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-2">
+                    {notesData?.map(note => (
+                      <div key={note.id} className="bg-secondary/40 p-3 rounded-lg text-sm group" onClick={() => {
+                        if (playerRef.current) {
+                          playerRef.current.seekTo(note.timestamp);
+                          playerRef.current.playVideo();
+                        }
+                      }}>
+                        <span className="text-primary font-mono mr-2 cursor-pointer">{formatTime(note.timestamp)}</span>
+                        <span className="text-foreground">{note.text}</span>
+                      </div>
+                    ))}
+                    {(!notesData || notesData.length === 0) && (
+                      <p className="text-center text-muted-foreground text-sm mt-8">No notes yet.</p>
+                    )}
+                  </div>
+                  <div className="relative isolate group mt-auto">
+                    <textarea
+                      value={notesText}
+                      onChange={(e) => setNotesText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (notesText.trim() && playerRef.current) {
+                            addNote.mutate({
+                              videoId,
+                              timestamp: Math.floor(currentTime),
+                              text: notesText.trim()
+                            });
+                            setNotesText('');
+                          }
+                        }
+                      }}
+                      placeholder="Take notes at current time... (Press Enter to save)"
+                      className="w-full bg-secondary/20 p-3 rounded-xl resize-none outline-none text-sm transition-all focus:bg-secondary/40 border border-transparent focus:border-border"
+                      rows={3}
+                    />
+                    <div className="absolute top-2 right-2 text-xs font-mono text-muted-foreground bg-background/80 px-1 py-0.5 rounded pointer-events-none group-focus-within:opacity-100 opacity-50 transition-opacity">
+                      {formatTime(currentTime)}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

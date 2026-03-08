@@ -45,6 +45,25 @@ export const focusSessions = pgTable("focus_sessions", {
   completed: boolean("completed").default(false),
 });
 
+export const notes = pgTable("notes", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  videoId: integer("video_id").notNull(),
+  timestamp: integer("timestamp").notNull(), // in seconds
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const quizResults = pgTable("quiz_results", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  videoId: integer("video_id").notNull(),
+  episodeIndex: integer("episode_index").notNull(),
+  score: integer("score").default(0).notNull(),
+  passed: boolean("passed").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const stories = pgTable("stories", {
   id: serial("id").primaryKey(),
   chapterNumber: integer("chapter_number").notNull(),
@@ -66,10 +85,14 @@ export const insertProgressSchema = createInsertSchema(progress).omit({ id: true
 
 export const insertFocusSessionSchema = createInsertSchema(focusSessions).omit({ id: true, date: true, userId: true });
 export const insertStorySchema = createInsertSchema(stories).omit({ id: true });
+export const insertNoteSchema = createInsertSchema(notes).omit({ id: true, userId: true, createdAt: true });
+export const insertQuizResultSchema = createInsertSchema(quizResults).omit({ id: true, userId: true, createdAt: true });
 
 export type User = typeof users.$inferSelect;
 export type Video = typeof videos.$inferSelect;
 export type Progress = typeof progress.$inferSelect;
+export type Note = typeof notes.$inferSelect;
+export type QuizResult = typeof quizResults.$inferSelect;
 
 export type FocusSession = typeof focusSessions.$inferSelect;
 export type Story = typeof stories.$inferSelect;

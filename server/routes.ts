@@ -284,5 +284,198 @@ export async function registerRoutes(
     }
   });
 
+  // -- EPISODES (Dynamic) --
+  app.get(api.episodes.list.path, authenticateToken, async (req: any, res) => {
+    try {
+      const videoId = Number(req.params.id);
+      const video = await storage.getVideos(req.user.id).then(videos => videos.find(v => v.id === videoId));
+
+      if (!video) {
+        return res.status(404).json({ message: "Video not found" });
+      }
+
+      const prog = await storage.getProgress(req.user.id, videoId);
+      const completedEpisodes = prog?.completedEpisodes || [];
+
+      let episodes = [];
+      let fetchedSuccessfully = false;
+
+      // 1. Try to fetch from YouTube API for chapters in description
+      try {
+        if (process.env.YOUTUBE_API_KEY) {
+          const response = await axios.get(`https://www.googleapis.com/youtube/v3/videos?id=${video.youtubeVideoId}&part=snippet&key=${process.env.YOUTUBE_API_KEY}`);
+          if (response.data.items && response.data.items.length > 0) {
+            const desc = response.data.items[0].snippet.description;
+            // Simple regex to parse timestamps like "00:00 Intro"
+            const timestampRegex = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s+(.+)/g;
+            let match;
+            let chapters = [];
+            while ((match = timestampRegex.exec(desc)) !== null) {
+              const hours = match[1] ? parseInt(match[1]) : 0;
+              const mins = parseInt(match[2]);
+              const secs = parseInt(match[3]);
+              const totalSecs = hours * 3600 + mins * 60 + secs;
+              chapters.push({ time: totalSecs, title: match[4].trim() });
+            }
+
+            if (chapters.length > 0) {
+              // Ensure first chapter starts at 0 if not present
+              if (chapters[0].time > 0) {
+                chapters.unshift({ time: 0, title: "Intro" });
+              }
+
+              for (let i = 0; i < chapters.length; i++) {
+                const startTime = chapters[i].time;
+                const endTime = chapters[i + 1] ? chapters[i + 1].time : (video.duration || startTime + 480);
+                episodes.push({
+                  episodeNumber: i + 1,
+                  title: chapters[i].title,
+                  startTime,
+                  endTime
+                });
+              }
+              fetchedSuccessfully = true;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch YouTube chapters:", err);
+      }
+
+      // 2. Fallback: Generate sequential 8-minute metadata
+      if (!fetchedSuccessfully) {
+        const episodeLength = 480; // 8 minutes
+        const duration = video.duration || 3600;
+        const totalEpisodes = Math.ceil(duration / episodeLength);
+
+        for (let i = 1; i <= totalEpisodes; i++) {
+          episodes.push({
+            episodeNumber: i,
+            title: `Part ${i}`,
+            startTime: (i - 1) * episodeLength,
+            endTime: Math.min(i * episodeLength, duration)
+          });
+        }
+      }
+
+      // Prepare UI state for each episode
+      const result = episodes.map(ep => {
+        const isCompleted = completedEpisodes.includes(ep.episodeNumber);
+        // Episode 1 always unlocked. Others unlocked if previous is completed.
+        const isUnlocked = ep.episodeNumber === 1 || completedEpisodes.includes(ep.episodeNumber - 1);
+        return {
+          ...ep,
+          completed: isCompleted,
+          unlocked: isUnlocked
+        };
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // -- QUIZZES --
+  app.get(api.quizzes.get.path, authenticateToken, async (req: any, res) => {
+    try {
+      const episodeIndex = Number(req.params.episodeIndex);
+      // MOCK: Since we don't have an OpenAI key hooked up yet, return mock AI questions
+      const mockQuestions = [
+        {
+          id: "q1",
+          question: "What is the primary topic discussed in this chapter?",
+          options: ["Introduction to concepts", "Advanced syntax", "Database optimization", "Server deployment"],
+          correctAnswer: 0,
+          explanation: "The chapter mainly introduces the core concepts."
+        },
+        {
+          id: "q2",
+          question: "Which of the following is true based on the episode?",
+          options: ["A is true", "B is false", "C is true", "Nothing is true"],
+          correctAnswer: 0
+        },
+        {
+          id: "q3",
+          question: "How do you apply the technique shown?",
+          options: ["Using method X", "Using method Y", "Using method Z", "Not applicable"],
+          correctAnswer: 1
+        },
+        {
+          id: "q4",
+          question: "Conceptual focus: Why is this important?",
+          options: ["For performance", "For security", "For scalability", "All of the above"],
+          correctAnswer: 3
+        },
+        {
+          id: "q5",
+          question: "What should you avoid doing?",
+          options: ["Best practice A", "Anti-pattern B", "Best practice C", "None"],
+          correctAnswer: 1,
+          explanation: "Anti-pattern B can cause memory leaks."
+        }
+      ];
+
+      res.status(200).json({
+        episodeId: episodeIndex,
+        questions: mockQuestions
+      });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to generate quiz" });
+    }
+  });
+
+  app.post(api.quizzes.submit.path, authenticateToken, async (req: any, res) => {
+    try {
+      const input = api.quizzes.submit.input.parse(req.body);
+      const videoId = Number(req.params.id);
+      const episodeIndex = Number(req.params.episodeIndex);
+
+      const result = await storage.addQuizResult(req.user.id, videoId, episodeIndex, input.score, input.passed);
+
+      let xpEarned = 0;
+      if (input.passed) {
+        // Award XP
+        xpEarned = 12;
+        const [user] = await storage.getUser(req.user.id).then(u => [u]); // Helper to bump XP directly if not exposed, or do raw DB update
+        if (user) {
+          const newXp = user.xp + xpEarned;
+          const newLevel = Math.floor(newXp / 400) + 1;
+          const { db } = require("./db");
+          const { users } = require("@shared/schema");
+          const { eq } = require("drizzle-orm");
+          await db.update(users).set({ xp: newXp, level: newLevel }).where(eq(users.id, user.id));
+        }
+      }
+
+      res.status(200).json({ xpEarned, passed: input.passed, result });
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // -- NOTES --
+  app.get(api.notes.list.path, authenticateToken, async (req: any, res) => {
+    try {
+      const videoId = Number(req.params.id);
+      const notes = await storage.getNotes(req.user.id, videoId);
+      res.status(200).json(notes);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch notes" });
+    }
+  });
+
+  app.post(api.notes.add.path, authenticateToken, async (req: any, res) => {
+    try {
+      const input = api.notes.add.input.parse(req.body);
+      const videoId = Number(req.params.id);
+      const note = await storage.addNote(req.user.id, videoId, input.timestamp, input.text);
+      res.status(201).json(note);
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
   return httpServer;
 }
