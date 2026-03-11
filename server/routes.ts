@@ -99,13 +99,36 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Video already added" });
       }
 
+      // Try to fetch actual duration from YouTube API
+      let durationInSeconds: number | undefined = input.duration;
+      
+      if (!durationInSeconds && process.env.YOUTUBE_API_KEY) {
+        try {
+          const ytRes = await axios.get(`https://www.googleapis.com/youtube/v3/videos?id=${input.youtubeVideoId}&part=contentDetails&key=${process.env.YOUTUBE_API_KEY}`);
+          const durationIso = ytRes.data.items?.[0]?.contentDetails?.duration;
+          
+          if (durationIso) {
+            // Parse ISO 8601 duration (e.g., PT1H2M10S) to seconds
+            const match = durationIso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            if (match) {
+              const hours = parseInt(match[1] || '0', 10);
+              const minutes = parseInt(match[2] || '0', 10);
+              const seconds = parseInt(match[3] || '0', 10);
+              durationInSeconds = hours * 3600 + minutes * 60 + seconds;
+            }
+          }
+        } catch (err) {
+          console.warn("[Video Add] Failed to fetch duration from YouTube API", err);
+        }
+      }
+
       const video = await storage.addVideo(
         req.user.id,
         input.youtubeUrl,
         input.youtubeVideoId,
         input.title,
         input.thumbnailUrl || undefined,
-        input.duration || undefined
+        durationInSeconds
       );
       res.status(201).json(video);
     } catch (err) {
@@ -119,14 +142,16 @@ export async function registerRoutes(
 
   app.delete(api.videos.delete.path, authenticateToken, async (req: any, res) => {
     const videoId = Number(req.params.id);
-    await storage.deleteVideo(req.user.id, videoId);
+    if (isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
+    await storage.deleteVideo(videoId, req.user.id);
     res.status(200).json({ success: true });
   });
 
 
   // -- PROGRESS --
   app.get(api.progress.get.path, authenticateToken, async (req: any, res) => {
-    const videoId = Number(req.params.id);
+    const videoId = Number(req.params.videoId || req.params.id);
+    if (isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
     const progress = await storage.getProgress(req.user.id, videoId);
     if (!progress) {
       // Create initial progress if none exists
@@ -138,8 +163,9 @@ export async function registerRoutes(
 
   app.put(api.progress.update.path, authenticateToken, async (req: any, res) => {
     try {
-      const videoId = Number(req.params.id);
       const input = api.progress.update.input.parse(req.body);
+      const videoId = input.videoId;
+      if (typeof videoId !== 'number' || isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
 
       const success = await storage.updateProgress(
         req.user.id,
@@ -174,8 +200,9 @@ export async function registerRoutes(
 
   app.post(api.progress.completeEpisode.path, authenticateToken, async (req: any, res) => {
     try {
-      const videoId = Number(req.params.id);
-      const { episodeIndex } = req.body;
+      const { videoId, episodeNumber: episodeIndex } = req.body;
+      if (typeof videoId !== 'number' || isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
+      if (typeof episodeIndex !== 'number' || isNaN(episodeIndex)) return res.status(400).json({ message: "Invalid episode index" });
 
       const currentProg = await storage.getProgress(req.user.id, videoId);
       if (!currentProg) return res.status(404).json({ message: "Progress not found" });
@@ -202,6 +229,7 @@ export async function registerRoutes(
   app.get(api.quizzes.get.path, authenticateToken, async (req: any, res) => {
     const videoId = Number(req.params.id);
     const episodeIndex = Number(req.params.episodeIndex);
+    if (isNaN(videoId) || isNaN(episodeIndex)) return res.status(400).json({ message: "Invalid parameters" });
 
     console.log(`[Quiz] Starting generation for Video ${videoId}, Episode ${episodeIndex}...`);
 
@@ -301,6 +329,7 @@ export async function registerRoutes(
       const input = api.quizzes.submit.input.parse(req.body);
       const videoId = Number(req.params.id);
       const episodeIndex = Number(req.params.episodeIndex);
+      if (isNaN(videoId) || isNaN(episodeIndex)) return res.status(400).json({ message: "Invalid parameters" });
 
       const result = await storage.addQuizResult(req.user.id, videoId, episodeIndex, input.score, input.passed);
 
@@ -346,6 +375,7 @@ export async function registerRoutes(
   app.get(api.notes.list.path, authenticateToken, async (req: any, res) => {
     try {
       const videoId = Number(req.params.id);
+      if (isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
       const notes = await storage.getNotes(req.user.id, videoId);
       res.status(200).json(notes);
     } catch (err) {
@@ -357,6 +387,7 @@ export async function registerRoutes(
     try {
       const input = api.notes.add.input.parse(req.body);
       const videoId = Number(req.params.id);
+      if (isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
       const note = await storage.addNote(req.user.id, videoId, input.timestamp, input.text);
       res.status(201).json(note);
     } catch (err) {
@@ -386,12 +417,13 @@ export async function registerRoutes(
   // Note: These are dynamically generated on-the-fly based on video duration
   app.get(api.episodes.list.path, authenticateToken, async (req: any, res) => {
     const videoId = Number(req.params.id);
+    if (isNaN(videoId)) return res.status(400).json({ message: "Invalid video ID" });
     const video = await storage.getVideos(req.user.id).then(videos => videos.find(v => v.id === videoId));
     if (!video) return res.status(404).json({ message: "Video not found" });
 
     const totalSeconds = video.duration || 0;
     const episodeLength = 480; // 8 minutes
-    const episodeCount = Math.ceil(totalSeconds / episodeLength);
+    const episodeCount = Math.max(1, Math.ceil(totalSeconds / episodeLength));
 
     const progress = await storage.getProgress(req.user.id, videoId);
     const completedIndices = progress?.completedEpisodes || [];
@@ -402,7 +434,7 @@ export async function registerRoutes(
         episodeNumber: index,
         title: `Episode ${index}`,
         startTime: i * episodeLength,
-        endTime: Math.min((i + 1) * episodeLength, totalSeconds),
+        endTime: totalSeconds > 0 ? Math.min((i + 1) * episodeLength, totalSeconds) : (i + 1) * episodeLength,
         unlocked: true, // For now all are unlocked
         completed: completedIndices.includes(index)
       };
